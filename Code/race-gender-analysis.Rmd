@@ -1,0 +1,220 @@
+---
+title: "unemployment-demographics"
+author: "Kelly Chen / 205-203-906"
+date: "5/11/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(data.table)
+
+unemployment <- read.csv("unemployment-demographics.csv",stringsAsFactors = FALSE)
+
+# excluding the demographic figures
+unemployment <- select(unemployment, st, rptdate, "Sample/Population"=c1,
+                                     "Male"=c2, "Female"=c3, "Gender-INA"=c4,
+                                     "Hispanic/Latino"=c40, "NHL"=c41, "NHL-INA"=c42,
+                                     "Am-In-Alask"=c43, "Asian"=c44, "Black"=c45,
+                                     "NativeHI-PacIs"=c46, "White"=c47,"Race-INA"=c48)
+
+unemployment$rptdate = as.Date(unemployment$rptdate, "%m/%d/%Y", )
+unemployment <- mutate(unemployment, 
+                       "Month"=format(unemployment$rpt, "%m"), 
+                       "Year"=as.numeric(format(unemployment$rpt, "%Y")),
+                       "Month-Year"=format(unemployment$rpt, "%m-%Y"))
+
+setDT(unemployment)
+
+unemployment <- unemployment[!(Year<2007)]
+
+setkey(unemployment, rptdate, Year, Month)
+```
+
+Gender Stats
+```{r}
+
+gender <- unemployment[, .(Male=sum(as.numeric(Male)),Female=sum(as.numeric(Female)),`Gender-INA`=sum(as.numeric(`Gender-INA`))), by=list(rptdate, Year, Month, `Month-Year`)]
+
+gender <- group_by(gender, rptdate, `Month-Year`, Year, Month) %>% summarise( Male=sum(as.numeric(Male)), Female=sum(as.numeric(Female)), "Gender-INA"=sum(as.numeric(`Gender-INA`)))
+
+gender2 <- pivot_longer(gender, cols = c("Female","Male","Gender-INA"),names_to = "Gender")
+gender2$value = as.numeric(gender2$value)
+
+gender2 <- arrange(gender2, desc(rptdate), .by_group = TRUE)
+
+gender2 <- gender2 %>% group_by(Gender) %>% 
+     mutate(pct_change = ((value/lag(value) - 1) * 100))
+
+setDT(gender2)
+
+# gender2$`Month-Year` = as.Date(strptime(gender2$`Month-Year`,format="%m-%Y"))
+
+library(ggplot2)
+library(plotly)
+library(dygraphs)
+library(scales)
+library(xts)
+
+ggplot(gender2, aes(x=rptdate,y=value,group=Gender)) +
+  geom_area(aes(color=Gender,fill=Gender),alpha=0.3) +
+  ylab("Total Unemployed") + 
+  xlab("Year") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size =8)) +
+  scale_y_continuous(labels = function(x) format(x, scientific = FALSE)) +
+  scale_x_date(breaks = pretty_breaks(10))
+
+setDT(gender2)
+gender3 <- gender2[Year>2018]
+ggplotly(ggplot(gender3, aes(x=rptdate,y=pct_change,group=Gender)) +
+  geom_line(aes(color=Gender,fill=Gender)) +
+  ylab("Percent Change in Unemployment") + 
+  xlab("Year") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size =8)) +
+  scale_y_continuous(labels = function(x) format(x, scientific = FALSE)) +
+  scale_x_date(breaks = pretty_breaks(10)))
+  
+Male <- xts(gender$Male, order.by=gender$rptdate)
+Female <- xts(gender$Female, order.by=gender$rptdate)
+"Gender-INA" <- xts(gender$`Gender-INA`, order.by = gender$rptdate)
+
+data <- cbind(Male,Female,`Gender-INA`)
+op <- par(mar = c(5,7,4,2) + 0.1)
+gendergraph <- dygraph(data, 
+                    main = "Unemployment by Gender",
+                    ylab ="Total Number Unemployed",
+                    xlab = "Date") %>%
+                dyOptions(colors = RColorBrewer::brewer.pal(3, "Dark2"),
+                          maxNumberWidth=20) %>% 
+                dyRangeSelector() %>%
+                dyAxis("y", 
+                       labelWidth=20,
+                       axisLabelFontSize = 10) %>% 
+                dyAxis("x",
+                       independentTicks = TRUE) %>% 
+                dyShading(from="2007-12-01", to="2009-06-30", color="#A2D8FF") %>% 
+                dyShading(from="2020-02-01", to="2020-04-30", color="#FFFFD6") %>%
+                dyLegend(show = "always", hideOnMouseOut = FALSE)
+
+library(htmlwidgets)
+saveWidget(gendergraph, file=paste0( getwd(), "/gender.html"))
+
+```
+
+Summary statistics for women
+```{r}
+
+
+
+```
+
+Race
+```{r}
+
+race <- unemployment[, .(`Am-In-Alask`=sum(as.numeric(`Am-In-Alask`)),Asian=sum(as.numeric(Asian)),`NativeHI-PacIs`=sum(as.numeric(`NativeHI-PacIs`)),Black=sum(as.numeric(Black)),White=sum(as.numeric(White)),`Race-INA`=sum(as.numeric(`Race-INA`))), by=list(rptdate, Year, Month, `Month-Year`)]
+
+race <- mutate(race,"total"= `Am-In-Alask` + Asian + `NativeHI-PacIs` + Black + White + `Race-INA`)
+
+race2 <- pivot_longer(race,cols= c(`Am-In-Alask`,Asian,`NativeHI-PacIs`,Black,White,`Race-INA`), names_to = "Race")
+
+race2 <- mutate(race2, proportion=value/total)
+
+#race2 <- race2[,-4]
+
+ggplot(race2, aes(x=`Month-Year`,y=value,group=Race)) +
+   geom_line(aes(color=Race)) +
+   ylab("Total Unemployed")
+
+race2 <- subset(race2, Race != "Race-INA")
+
+# proportionsgender2 <- arrange(gender2, desc(rptdate), .by_group = TRUE)
+race2 <- race2 %>% group_by(Race) %>% 
+     mutate(pct_change = ((value/lag(value) - 1) * 100))
+
+
+pie(subset(race2, `Month-Year`=="04-2020")$proportion,subset(race2, `Month-Year`=="04-2020")$Race,main="Racial Demographics of Unemployed (April 2020)")
+
+pie(subset(race2, `Month-Year`=="03-2020")$proportion,subset(race2, `Month-Year`=="03-2020")$Race,main="Racial Demographics of Unemployed (March 2020)")
+
+ggplot(race2, aes(x=`Month-Year`,y=proportion,group=Race)) +
+   geom_line(aes(color=Race)) +
+   ylab("proportion unemployed of total population")
+
+setDT(race2)
+race3 <- race2[!Year<2007]
+
+
+White <- xts(race$White, order.by=race$rptdate)
+Black <- xts(race$Black, order.by=race$rptdate)
+Asian <- xts(race$Asian, order.by=race$rptdate)
+"American Indian/Alaskan" <-xts(race$`Am-In-Alask`, order.by=race$rptdate)
+"Hawaiian/Pacific Islander" <- xts(race$`NativeHI-PacIs	`,order.by=race$rptdate)
+"Race-INA" <- xts(race$`Race-INA`, order.by = race$rptdate)
+
+race4 <- cbind(White, Black, Asian, `American Indian/Alaskan`, `Hawaiian/Pacific Islander`, `Race-INA`)
+
+racegraph <- dygraph(race4, 
+                    main = "Unemployment by Race",
+                    ylab ="Total Number Unemployed",
+                    xlab = "Date") %>%
+                dyOptions(colors = RColorBrewer::brewer.pal(6, "Set2"),
+                          maxNumberWidth=20) %>% 
+                dyRangeSelector() %>%
+                dyAxis("y", 
+                       labelWidth=20,
+                       axisLabelFontSize = 10) %>% 
+                dyAxis("x",
+                       independentTicks = TRUE) %>% 
+                dyShading(from="2007-12-01", to="2009-06-30", color="#A2D8FF") %>% 
+                dyShading(from="2020-02-01", to="2020-04-30", color="#FFFFD6") %>%
+                dyLegend(show="onmouseover",hideOnMouseOut = TRUE, width=250)
+
+saveWidget(racegraph, file=paste0( getwd(), "/race.html"))
+
+# other exploratory graphs
+ggplot(race3, aes(x=rptdate,y=pct_change,group=Race)) +
+  geom_line(aes(color=Race)) +
+  ylab("Percent Change in Unemployment") + 
+  xlab("Year") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size =8)) +
+  scale_y_continuous(labels = function(x) format(x, scientific = FALSE)) +
+  scale_x_date(breaks = pretty_breaks(10))
+
+```
+
+```{r}
+
+White <- xts(race2[race2[,Race=="White"],]$pct_change, order.by=race2[race2[,Race=="White"],]$rptdate)
+Black <- xts(race2[race2[,Race=="Black"],]$pct_change, order.by=race2[race2[,Race=="Black"],]$rptdate)
+Asian <- xts(race2[race2[,Race=="Asian"],]$pct_change, order.by=race2[race2[,Race=="Asian"],]$rptdate)
+"American Indian/Alaskan" <- xts(race2[race2[,Race=="Am-In-Alask"],]$pct_change, order.by=race2[race2[,Race=="Am-In-Alask"],]$rptdate)
+"Hawaiian/Pacific Islander" <- xts( race2[race2[,Race=="NativeHI-PacIs"],]$pct_change, order.by=race2[race2[,Race=="NativeHI-PacIs"],]$rptdate)
+"Race-INA" <- xts( race2[race2[,Race=="Race-INA"],]$pct_change, order.by=race2[race2[,Race=="Race-INA"],]$rptdate)
+
+race5 <- cbind(White, Black, Asian, `American Indian/Alaskan`, `Hawaiian/Pacific Islander`, `Race-INA`)
+
+racegraph2 <- dygraph(race5, 
+                    main = "Unemployment by Race",
+                    ylab ="Total Number Unemployed",
+                    xlab = "Date") %>%
+                dyOptions(colors = RColorBrewer::brewer.pal(6, "Set2"),
+                          maxNumberWidth=20) %>% 
+                dyRangeSelector() %>%
+                dyAxis("y", 
+                       labelWidth=20,
+                       axisLabelFontSize = 10) %>% 
+                dyAxis("x",
+                       independentTicks = TRUE) %>% 
+                dyShading(from="2007-12-01", to="2009-06-30", color="#A2D8FF") %>% 
+                dyShading(from="2020-02-01", to="2020-04-30", color="#FFFFD6") %>%
+                dyLegend(show="onmouseover",hideOnMouseOut = TRUE, width=250)
+
+saveWidget(racegraph2, file=paste0( getwd(), "/race2.html"))
+
+```
